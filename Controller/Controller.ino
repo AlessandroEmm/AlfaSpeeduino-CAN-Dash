@@ -11,6 +11,10 @@
 #include "STM32_CAN.h" //My own STM32 CAN library
 #include "STM32_PWM.h" 
 #include <src/switecX12.h>
+#include <map>
+
+
+
   //With the AX1201728SG, we get microstepping, so 1/12 degree micro steps. We need this value in few places
 #define MICROSTEPS (315*12)
 
@@ -25,28 +29,27 @@
 #define USING_MICROS_RESOLUTION       true 
 
 //  Voltages Levels Min/Max
-#define minCltV = 7
-#define maxCltV = 34
-#define minOilPressureV = 7
-#define maxOilPressureV = 85
-#define minFuelLevelV = 3
-#define maxFuelLevelV = 34
+#define minCltV 8
+#define maxCltV 29
+#define minOilPressureV 7
+#define maxOilPressureV 85
+#define minFuelLevelV 3
+#define maxFuelLevelV 34
 
 
- int oilPressurePin = PB7;
+ int oilPressurePin = PB8;
 TIM_TypeDef *oilPressureGaugeTimer = (TIM_TypeDef *)pinmap_peripheral(digitalPinToPinName(oilPressurePin), PinMap_PWM); 
  uint32_t oilPressureChannel = STM_PIN_CHANNEL(pinmap_function(digitalPinToPinName(oilPressurePin), PinMap_PWM));
    // Instantiate HardwareTimer object. Thanks to 'new' instantiation, HardwareTimer is not destructed when setup() function is finished.
 HardwareTimer *oilPressureGauge = new HardwareTimer(oilPressureGaugeTimer);
-// int previousSpeed = 0;
 
-int fuelLevelPressurePin = PB9;
-TIM_TypeDef *fuelLevelGaugeTimer = (TIM_TypeDef *)pinmap_peripheral(digitalPinToPinName(fuelLevelPressurePin), PinMap_PWM); 
-uint32_t fuelLevelChannel = STM_PIN_CHANNEL(pinmap_function(digitalPinToPinName(fuelLevelPressurePin), PinMap_PWM));
+int fuelLevelPin = PB9;
+TIM_TypeDef *fuelLevelGaugeTimer = (TIM_TypeDef *)pinmap_peripheral(digitalPinToPinName(fuelLevelPin), PinMap_PWM); 
+uint32_t fuelLevelChannel = STM_PIN_CHANNEL(pinmap_function(digitalPinToPinName(fuelLevelPin), PinMap_PWM));
 HardwareTimer *fuelLevelGauge = new HardwareTimer(fuelLevelGaugeTimer);
 
 
-int cltPin = PB8;
+int cltPin = PB7;
 TIM_TypeDef *cltGaugeTimer = (TIM_TypeDef *)pinmap_peripheral(digitalPinToPinName(cltPin), PinMap_PWM);
 uint32_t cltChannel = STM_PIN_CHANNEL(pinmap_function(digitalPinToPinName(cltPin), PinMap_PWM));
 HardwareTimer *cltGauge = new HardwareTimer(cltGaugeTimer);
@@ -68,8 +71,8 @@ SwitecX12 RPMGauge(MICROSTEPS, PB6, PB7, 1);
 bool RPM_Request=true;
 bool CLT_Request=true;
 bool oilPressure_Request=true;
-uint16_t RPM,RPMsteps,CLTpos,fuelLevelPos,oilPressurePos;
-
+uint16_t RPM,RPMsteps,fuelLevelPos,oilPressurePos;
+float CLTpos;
 int8_t oneSec;
 // Extra values to keep track of.
 uint8_t CLT, IAT;
@@ -109,8 +112,8 @@ void setup(void)
   // Filter out unwanted CAN messages.
   Can1.setMBFilterProcessing( MB0, 0x316, 0x1FFFFFFF );
   Can1.setMBFilterProcessing( MB1, 0x329, 0x1FFFFFFF );
-  Can1.setMBFilterProcessing( MB2, 0x153, 0x1FFFFFFF );
-  Can1.setMBFilterProcessing( MB3, 0x7E8, 0x1FFFFFFF );
+  Can1.setMBFilterProcessing( MB2, 0x324, 0x1FFFFFFF );
+  Can1.setMBFilterProcessing( MB3, 0x339, 0x1FFFFFFF );
 
   CAN_inMsg.len = 8;
   
@@ -135,11 +138,10 @@ void setup(void)
   gaugeTimer->attachInterrupt(updateGauges);
   gaugeTimer->resume();
 
- 
-  // oilPressureGauge->setPWM(channel, oilPressurePin, 200, 10);
-  // cltGauge->setPWM(channel, oilPressurePin, 200, 10);
-  // fuelLevelGauge->setPWM(channel, oilPressurePin, 200, 10);
-  // Serial.println("Setup done");
+  oilPressureGauge->setPWM(oilPressureChannel, oilPressurePin, 200, minOilPressureV);
+  cltGauge->setPWM(cltChannel, cltPin, 200, 20);
+  delay(5000);
+  fuelLevelGauge->setPWM(fuelLevelChannel, fuelLevelPin, 200, minFuelLevelV);
 }
 
 
@@ -166,14 +168,80 @@ void CalcRPMgaugeSteps()
 }
 
 
-
 void CalcCLTGaugePos()
 {
-  uint16_t tempCLTPos = 0;
-  tempCLTPos = map(CLT, 60, 120, 0, MICROSTEPS);
-  // low pass filter the step value to prevent the needle from jumping.
-  CLTpos = FILTER(tempCLTPos, filter_amount, CLTpos);
-  cltGauge->setCaptureCompare(cltChannel, CLTpos, PERCENT_COMPARE_FORMAT);
+  CLT = 52;
+int tempCLTPos = 0;
+if ( CLT >= 10 && CLT <= 44 ) // < 1000rpm
+  {
+    tempCLTPos = 3;
+  }
+ 
+ else if ( CLT >= 45 && CLT <= 51 ) // < 1000rpm
+  {
+    tempCLTPos = 9;
+  }
+  else if ( CLT >= 52 && CLT <= 55 ) // < 10
+  {
+    tempCLTPos = 11;
+  }
+  else if ( CLT > 55 && CLT <= 60 ) // >= 1000rpm
+  {
+    tempCLTPos = 15;
+  }
+  else if ( CLT > 60 && CLT <= 65  )// limit to max steps
+  {
+   tempCLTPos = 19;
+  }
+  else if ( CLT > 66 && CLT <= 70  )// limit to max steps
+  {
+   tempCLTPos = 23;
+  }
+    else if ( CLT > 71 && CLT <= 75  )// limit to max steps
+  {
+   tempCLTPos = 27;
+  }
+     else if ( CLT > 76 && CLT <= 78  )// limit to max steps
+  {
+   tempCLTPos = 30;
+  }
+      else if ( CLT > 79 && CLT <= 81  )// limit to max steps
+  {
+   tempCLTPos = 32;
+  }
+      else if ( CLT > 82 && CLT <= 84  )// limit to max steps
+  {
+   tempCLTPos = 35;
+  }
+   else if ( CLT > 85 && CLT <= 89  )// limit to max steps
+  {
+   tempCLTPos = 39;
+  }
+          else if ( CLT > 90 && CLT <= 94  )// limit to max steps
+  {
+   tempCLTPos = 43;
+  }
+           else if ( CLT > 95 && CLT <= 99  )// limit to max steps
+  {
+   tempCLTPos = 48;
+  }
+          else if ( CLT > 100 && CLT <= 105  )// limit to max steps
+  {
+   tempCLTPos = 55;
+  }
+            else if ( CLT > 106 && CLT <= 110  )// limit to max steps
+  {
+   tempCLTPos = 64;
+  }
+              else if ( CLT > 110 && CLT <= 120  )// limit to max steps
+  {
+   tempCLTPos = 100;
+  }
+  else 
+  { tempCLTPos = maxCltV; }
+
+     Serial.print (tempCLTPos); Serial.print (" "); Serial.println (CLT );
+  cltGauge->setCaptureCompare(cltChannel, tempCLTPos, RESOLUTION_8B_COMPARE_FORMAT);
 }
 void CalcFuelLevelGaugePos()
 {
@@ -181,7 +249,7 @@ void CalcFuelLevelGaugePos()
   tempFuelPos = map(fuelLevel, 0, 255, 0, 100);
   // low pass filter the step value to prevent the needle from jumping.
   fuelLevelPos = FILTER(tempFuelPos, filter_amount, fuelLevelPos);
-  fuelLevelGauge->setCaptureCompare(fuelLevelChannel, oilPressurePos, PERCENT_COMPARE_FORMAT);
+  fuelLevelGauge->setCaptureCompare(fuelLevelChannel, oilPressurePos, RESOLUTION_8B_COMPARE_FORMAT);
 }
 void CalcOilPressureGaugePos()
 {
@@ -189,7 +257,7 @@ void CalcOilPressureGaugePos()
   tempOilPressurePos = map(oilPressure, 0, 255, 0, 100);
   // low pass filter the step value to prevent the needle from jumping.
   oilPressurePos = FILTER(tempOilPressurePos, filter_amount, oilPressurePos);
-  oilPressureGauge->setCaptureCompare(oilPressureChannel, oilPressurePos, PERCENT_COMPARE_FORMAT);
+  oilPressureGauge->setCaptureCompare(oilPressureChannel, oilPressurePos, RESOLUTION_8B_COMPARE_FORMAT);
 }
 
 
@@ -203,29 +271,21 @@ void readCanMessage()
       CalcRPMgaugeSteps();
       uint32_t tempRPM;
       tempRPM = RPM;
-      // convert the e39/e46 RPM data to real RPM reading
-      tempRPM = (tempRPM * 10) / 64;
       RPM_timeout = millis();             // zero the timeout
     break;
-    case 0x329: // CLT in e39/e46 etc.
+    case 0x329: 
       CLT = (CAN_inMsg.buf[1]);
       IAT = (CAN_inMsg.buf[3]);
-      Serial.print("IAT ");Serial.println(IAT);
-      Serial.print("CLT ");Serial.println(CLT);
       TPS = (CAN_inMsg.buf[5]);
-          Serial.print("TPS ");Serial.println(TPS);
+      CalcCLTGaugePos();
+    break;
+    case 0x324: 
       //CalcCLTgaugeSteps();
     break;
-    case 0x324: // CLT in e39/e46 etc.
-      CLT = (CAN_inMsg.buf[1]);
-     
-      TPS = (CAN_inMsg.buf[5]);
-      //CalcCLTgaugeSteps();
-    break;
-    case 0x339: // CLT in e39/e46 etc.
-      CLT = (CAN_inMsg.buf[1]);
-      TPS = (CAN_inMsg.buf[5]);
-      //CalcCLTgaugeSteps();
+    case 0x339: 
+        // Serial.print("o2 ");Serial.println(CAN_inMsg.buf[1]);
+        // Serial.print("egocorrection ");Serial.println(CAN_inMsg.buf[2]);
+        // Serial.print("gammacorrection ");Serial.println(CAN_inMsg.buf[3]);
     break;
     default:
       // nothing to do here
@@ -292,3 +352,5 @@ void loop(void)
     readCanMessage();
   }
 }
+
+

@@ -119,6 +119,8 @@ uint8_t fuelPressure;
 uint8_t engineStatus[8] = {0}; 
 uint8_t status ;
 uint32_t PWcount;
+uint8_t O2;
+uint8_t egoCorrection, gammaEnrichment;
 uint8_t TPS,tempLight; // TPS value and overheat light on/off
 bool data_error; //indicator for the data from speeduino being ok.
 bool responseSent; // to keep track if we have responded to data request or not.
@@ -158,13 +160,18 @@ void SendData()   // Send can messages in 50Hz phase from timer interrupt. This 
   CAN_msg_CLT_TPS.buf[1]= CLT; // Coolant temp
   CAN_msg_CLT_TPS.buf[3]= IAT; // Coolant temp
   CAN_msg_CLT_TPS.buf[5]= TPS; // TPS value.
-
   Can1.write(CAN_msg_CLT_TPS);
 
     //Send Fuel and Oil Pressure
   CAN_msg_Pressures.buf[1]= oilPressure; // Coolant temp
   CAN_msg_Pressures.buf[4]= fuelPressure; // TPS value.
   Can1.write(CAN_msg_Pressures);
+
+      //Send Fuel and Oil Pressure
+  CAN_msg_O2.buf[1]=  O2; // O2
+  CAN_msg_O2.buf[2]= egoCorrection; // TPS value.
+  CAN_msg_O2.buf[3]= gammaEnrichment; // TPS value.
+  Can1.write(CAN_msg_O2);
 
  
   // Fuel consumption counter is 2-bytes so if the current value is higher than that, we roll over the counter.
@@ -196,6 +203,8 @@ void setup(){
 
   CAN_msg_RPM.len = 8; // 8 bytes in can message
   CAN_msg_CLT_TPS.len = 7;
+  CAN_msg_Pressures.len = 4;
+  CAN_msg_O2.len = 3;
 
   CAN_msg_RPM.id = 0x316; // CAN ID for RPM message is 0x316
   CAN_msg_CLT_TPS.id = 0x329; // CAN ID for CLT and TSP message is 0x329
@@ -257,6 +266,9 @@ void setup(){
   ascMSG = false;
   radOutletTemp = 0;
   oilTemp = 0;
+  O2=147;
+  egoCorrection=0;
+  gammaEnrichment=100;
 
 
   SendTimer->setOverflow(ClusterUpdateRate, HERTZ_FORMAT);
@@ -278,6 +290,8 @@ void displayData(){
   Serial.print ("TPS-"); Serial.print (TPS); Serial.println("\t");
   Serial.print ("OilPressure-"); Serial.print (oilPressure); Serial.println("\t");
   Serial.print ("FuelPressure-"); Serial.print (fuelPressure); Serial.println("\t");
+    Serial.print ("O2-"); Serial.print (O2); Serial.println("\t");
+  Serial.print ("EcoCrrection-"); Serial.print (egoCorrection); Serial.println("\t");
 
 }
 
@@ -379,6 +393,9 @@ void processData(){   // necessary conversion for the data before sending to CAN
   IAT = currentStatus.IAT - 40;
 //   engineStatus[4] = currentStatus.status3[7];
 //   engineStatus[2] = currentStatus.spark[7];
+  O2 = currentStatus.O2;
+  egoCorrection = currentStatus.egoCorrection;
+  gammaEnrichment = currentStatus.corrections;
  }
 
 void HandleN()
