@@ -11,9 +11,10 @@
 #include "STM32_CAN.h" //My own STM32 CAN library
 #include "STM32_PWM.h" 
 #include <src/switecX12.h>
-#include <map>
 
+static bool forward = true;
 
+#define LED_BUILTIN             PB2
 
   //With the AX1201728SG, we get microstepping, so 1/12 degree micro steps. We need this value in few places
 #define MICROSTEPS (315*12)
@@ -24,9 +25,12 @@
 #define FILTER(input, alpha, prior) (((long)input * (256 - alpha) + ((long)prior * alpha))) >> 8
 // 50 Hz rate to update data from OBD2. This can be adjusted to suit the needs.
 #define GaugePWMRate 50
-// Custom font for the screens
 
-#define USING_MICROS_RESOLUTION       true 
+#define MAXRPM 7000.0
+#define MAXPOSITION 2923.0
+#define MINRPM 500.0
+#define MAXPOSITIONOFFSET MINRPM / 7000.0
+#define MINRPMPOSITION 0.0
 
 //  Voltages Levels Min/Max
 #define minCltV 8
@@ -65,7 +69,7 @@ STM32_CAN Can1( CAN1, DEF, RX_SIZE_64, TX_SIZE_16 );
 
 #define FLASH_BASEADRESS     0x801D400UL
 
-SwitecX12 RPMGauge(MICROSTEPS, PB6, PB7, 1);
+SwitecX12 RPMGauge(MICROSTEPS, PB10, PB11, 0);
 
 // to keep track of if OBD2 requests have been sent.
 bool RPM_Request=true;
@@ -80,12 +84,6 @@ uint8_t fuelLevel, oilPressure;
 uint8_t TPS;
 // for now program memory flash is used to store odometer/trip. It has wear limit, so we try to avoid writing to it as much as possible. So this makes the flash to be written only once on every power up.
 bool notCommitted;
-// push buttons on the instrument cluster
-const int leftButton = PC13;
-const int rightButton = PB5;
-// the instrument cluster can be kept on using this pin as output to drive home the needles.
-const int powerPin = PA0;
-// instrument cluster lights.
 const int oilPressLight = PB1;
 const int fuelReserveLight = PB0;
 const int brakeLight = PA1;
@@ -101,6 +99,13 @@ void updateGauges()
   RPMGauge.update();
 }
 
+void zero(void)
+{
+ //  RPMGauge.zero();
+   Serial.println("Reset Gauge");
+   RPMGauge.zero();
+
+}
 
 void setup(void)
 {
@@ -116,7 +121,10 @@ void setup(void)
   Can1.setMBFilterProcessing( MB3, 0x339, 0x1FFFFFFF );
 
   CAN_inMsg.len = 8;
-  
+  pinMode(PA0, INPUT);
+  pinMode(PB12, OUTPUT);
+  digitalWrite(PB12, HIGH);
+  attachInterrupt(digitalPinToInterrupt(PA0), zero, RISING);
   RPM = 0;
   RPMsteps = 0;
   oneSec = 0;
@@ -124,7 +132,6 @@ void setup(void)
   CLT = 0;
   TPS = 0;
   notCommitted = true;
-  RPMGauge.setPosition(0);
 
   // setup hardwaretimer to request obd data in 50Hz pace. Otherwise the obd2 requests can be too fast. This timer is also used to calculate odometer and trip in 1sec intervals.
 #if defined(TIM1)
@@ -144,27 +151,18 @@ void setup(void)
   fuelLevelGauge->setPWM(fuelLevelChannel, fuelLevelPin, 200, minFuelLevelV);
 }
 
+int determineTachPos(int currentRPM) {
+  if (currentRPM < MINRPM) return determineTachPos(MINRPM);
+  else if (currentRPM > MAXRPM) return determineTachPos(MAXRPM);
+  else  {
+    int rpmPosition =  ((MAXPOSITION / MAXRPM) * currentRPM) * (1.0 + (MAXPOSITIONOFFSET - (MINRPM / float(currentRPM))))  ;
+    return rpmPosition;
+  }
+}
 
 void CalcRPMgaugeSteps()
 {
-  uint16_t tempRPMsteps = 0;
-  // RPM gauge face is not linear. Below 1000 RPM has different scale than above it.
-  if ( RPM < 6400 ) // < 1000rpm
-  {
-    tempRPMsteps = map(RPM, 0, 6400, 0, 50);
-  }
-  else if ( RPM < 63616 ) // >= 1000rpm
-  {
-    tempRPMsteps = map(RPM, 6400, 63616, 50, MICROSTEPS);
-  }
-  else if ( RPM >= 63616 )// limit to max steps
-  {
-    tempRPMsteps = MICROSTEPS;
-  }
-
-  // low pass filter the step value to prevent the needle from jumping.
-  RPMsteps = FILTER(tempRPMsteps, filter_amount, RPMsteps);
-  RPMGauge.setPosition(RPMsteps);
+  RPMGauge.setPosition(determineTachPos(RPM));
 }
 
 
@@ -240,7 +238,7 @@ if ( CLT >= 10 && CLT <= 44 ) // < 1000rpm
   else 
   { tempCLTPos = maxCltV; }
 
-     Serial.print (tempCLTPos); Serial.print (" "); Serial.println (CLT );
+   //  Serial.print (tempCLTPos); Serial.print (" "); Serial.println (CLT );
   cltGauge->setCaptureCompare(cltChannel, tempCLTPos, RESOLUTION_8B_COMPARE_FORMAT);
 }
 void CalcFuelLevelGaugePos()
@@ -269,9 +267,8 @@ void readCanMessage()
     case 0x316: // RPM in e39/e46 etc.
       RPM = ((CAN_inMsg.buf[3] << 8) | (CAN_inMsg.buf[2]));
       CalcRPMgaugeSteps();
-      uint32_t tempRPM;
-      tempRPM = RPM;
       RPM_timeout = millis();             // zero the timeout
+      // Serial.println(RPM);
     break;
     case 0x329: 
       CLT = (CAN_inMsg.buf[1]);
@@ -299,53 +296,33 @@ void readCanMessage()
 void clusterShutdown()
 {
   // Set the needles back to zero
-  RPMGauge.setPosition(0);
+  RPMGauge.setPosition(determineTachPos(0));
   if (notCommitted) {
 	notCommitted = false;
     
   }
   // wait until zero
   while ( (RPMGauge.currentStep != 0) && (RPMGauge.currentStep != 0) ) {
-    //Serial.println(RPMGauge.currentStep);
-  }
-  // turn off the cluster
-  digitalWrite(powerPin, LOW);
+    Serial.println(RPMGauge.currentStep);
+  } 
   Serial.println("Shutdown completed");
 }
 
-void writeDataToFlash()
-{
-  FLASH_EraseInitTypeDef EraseInitStruct;
-  uint32_t pageError = 0;
-  
-  /* ERASING page */
-  EraseInitStruct.TypeErase = FLASH_TYPEERASE_PAGES;
-  EraseInitStruct.Banks = 1;
-  EraseInitStruct.PageAddress = FLASH_BASEADRESS;
-  EraseInitStruct.NbPages = 1;
 
-  //Clear any flash errors before try writing to flash to prevent write failures.
-  if(__HAL_FLASH_GET_FLAG(FLASH_FLAG_WRPERR) != RESET) __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_WRPERR);
-  if(__HAL_FLASH_GET_FLAG(FLASH_FLAG_PGERR) != RESET) __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_PGERR);
-
-  HAL_FLASH_Unlock();
-  if (HAL_FLASHEx_Erase(&EraseInitStruct, &pageError) == HAL_OK){Serial.println("Flash page erased");}
-  HAL_FLASH_Lock();
-}
 
 void loop(void)
 {
+
   if ( (millis()-RPM_timeout) > 500) { // timeout, because no RPM data from CAN bus
     RPM_timeout = millis();
     RPM = 0;
-    RPMGauge.setPosition(0);
     RPM_Request = true;
-    Serial.println ("RPM timeout");
-	// no RPM data, so we assume that the car has shut down. So proceed to shut down the cluster too.
-	Serial.println ("Shutdown started");
-	clusterShutdown();
+    Serial.print ("RPM timeout");
+    // no RPM data, so we assume that the car has shut down. So proceed to shut down the cluster too.
+    Serial.println ("Shutdown started");
+    clusterShutdown();
   }
-  
+
 
   // see if there is messages available on can bus to read.
   while (Can1.read(CAN_inMsg) ) {
