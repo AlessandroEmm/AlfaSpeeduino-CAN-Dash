@@ -103,8 +103,10 @@ void zero(void)
 {
  //  RPMGauge.zero();
    Serial.println("Reset Gauge");
-   RPMGauge.zero();
-
+   RPMGauge.setPosition(MICROSTEPS);
+   delay(2000);
+   RPMGauge.setPosition(0);
+delay(2000);
 }
 
 void setup(void)
@@ -268,7 +270,6 @@ void readCanMessage()
       RPM = ((CAN_inMsg.buf[3] << 8) | (CAN_inMsg.buf[2]));
       CalcRPMgaugeSteps();
       RPM_timeout = millis();             // zero the timeout
-      // Serial.println(RPM);
     break;
     case 0x329: 
       CLT = (CAN_inMsg.buf[1]);

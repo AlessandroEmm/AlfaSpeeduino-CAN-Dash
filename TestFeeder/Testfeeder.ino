@@ -25,13 +25,12 @@
 
 
 static CAN_message_t CAN_msg_RPM;
-static CAN_message_t CAN_msg_CLT_TPS;
+static CAN_message_t CAN_msg_CLT_Baro;
 static CAN_message_t CAN_msg_O2;
 static CAN_message_t CAN_msg_IAT;
 static CAN_message_t CAN_msg_Pressures;
 static CAN_message_t CAN_msg_Statuses;
 
-static CAN_message_t CAN_msg_BatteryV;
 
 static CAN_message_t CAN_inMsg;
 
@@ -113,10 +112,10 @@ uint8_t odometerLSB;
 uint8_t odometerMSB;
 uint8_t FuelLevel;
 uint8_t ambientTemp;
-int CLT, IAT; // to store coolant temp
+int CLT, IAT, batteryV, baro; // to store coolant temp
 uint8_t oilPressure;
 uint8_t fuelPressure;
-uint8_t engineStatus[8] = {0}; 
+uint8_t engineStatus; 
 uint8_t status ;
 uint32_t PWcount;
 uint8_t O2;
@@ -135,6 +134,7 @@ uint8_t radOutletTemp;
 uint8_t oilTemp;
 
 
+
 // define hardwaretimers
 TIM_TypeDef *Instance1 = TIM1;
 TIM_TypeDef *Instance2 = TIM3;
@@ -151,33 +151,28 @@ void SendData()   // Send can messages in 50Hz phase from timer interrupt. This 
 {
   CAN_msg_RPM.buf[2]= rpmLSB; // RPM LSB
   CAN_msg_RPM.buf[3]= rpmMSB; // RPM MSB
+  CAN_msg_RPM.buf[1]= TPS; // TPS value.
+  CAN_msg_RPM.buf[0]= batteryV; // Battery value.
+  CAN_msg_RPM.buf[4]=  O2;
+   CAN_msg_O2.buf[5]= egoCorrection; // ego correction value.
+  CAN_msg_O2.buf[6]= gammaEnrichment; // gamma enrichment value.
+
   
   if ( Can1.write(CAN_msg_RPM) ){
     digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // Just to see with internal led that CAN messages are being sent
   }
 
     //Send CLT and TPS
-  CAN_msg_CLT_TPS.buf[1]= CLT; // Coolant temp
-  CAN_msg_CLT_TPS.buf[3]= IAT; // Coolant temp
-  CAN_msg_CLT_TPS.buf[5]= TPS; // TPS value.
-  Can1.write(CAN_msg_CLT_TPS);
+  CAN_msg_CLT_Baro.buf[0]= CLT; // Coolant temp
+  CAN_msg_CLT_Baro.buf[1]= IAT; // Air temp
+  CAN_msg_CLT_Baro.buf[2]= baro; // Air temp
+  Can1.write(CAN_msg_CLT_Baro);
 
     //Send Fuel and Oil Pressure
-  CAN_msg_Pressures.buf[1]= oilPressure; // Coolant temp
-  CAN_msg_Pressures.buf[4]= fuelPressure; // TPS value.
+  CAN_msg_Pressures.buf[0]= oilPressure; // Coolant temp
+  CAN_msg_Pressures.buf[1]= fuelPressure; // TPS value.
+  CAN_msg_Pressures.buf[2]= engineStatus; // EngineStatus
   Can1.write(CAN_msg_Pressures);
-
-      //Send Fuel and Oil Pressure
-  CAN_msg_O2.buf[1]=  O2; // O2
-  CAN_msg_O2.buf[2]= egoCorrection; // TPS value.
-  CAN_msg_O2.buf[3]= gammaEnrichment; // TPS value.
-  Can1.write(CAN_msg_O2);
-
- 
-  // Fuel consumption counter is 2-bytes so if the current value is higher than that, we roll over the counter.
-
-  pwMSB = highByte(uint16_t(PWcount));  // split to high and low byte
-  pwLSB = lowByte(uint16_t(PWcount));
 
   
   MSGcounter++;
@@ -194,6 +189,7 @@ void setup(){
   pinMode(LED_BUILTIN, OUTPUT);
 
   doRequest = false;
+
   Can1.begin();
   Can1.setBaudRate(500000);
   Can1.setMBFilterProcessing( MB0, 0x153, 0x1FFFFFFF );
@@ -201,13 +197,12 @@ void setup(){
   Can1.setMBFilterProcessing( MB2, 0x615, 0x1FFFFFFF );
   Can1.setMBFilterProcessing( MB3, 0x1F0, 0x1FFFFFFF );
 
-  CAN_msg_RPM.len = 8; // 8 bytes in can message
-  CAN_msg_CLT_TPS.len = 7;
-  CAN_msg_Pressures.len = 4;
-  CAN_msg_O2.len = 3;
+  CAN_msg_RPM.len = 7; // 8 bytes in can message
+  CAN_msg_CLT_Baro.len = 3;
+  CAN_msg_Pressures.len = 3;
 
   CAN_msg_RPM.id = 0x316; // CAN ID for RPM message is 0x316
-  CAN_msg_CLT_TPS.id = 0x329; // CAN ID for CLT and TSP message is 0x329
+  CAN_msg_CLT_Baro.id = 0x329; // CAN ID for CLT and TSP message is 0x329
   CAN_msg_Pressures.id = 0x324; // CAN ID for CLT and TSP message is 0x329
   CAN_msg_O2.id = 0x339; // CAN ID for CLT and TSP message is 0x329
 
@@ -219,36 +214,24 @@ void setup(){
   CAN_msg_RPM.buf[6]= 0x00;  //not used
   CAN_msg_RPM.buf[7]= 0x35;  //Theorethical Engine Torque in % of C_TQ_STND after charge intervention
 
-  CAN_msg_CLT_TPS.buf[0]= 0x11;  //Multiplexed Information
-  CAN_msg_CLT_TPS.buf[2]= 0xB2;  //CLT temp
-  CAN_msg_CLT_TPS.buf[3]= 0x00;  //IAT
-  CAN_msg_CLT_TPS.buf[4]= 0x08;  //bitfield, Bit0 = 0 = Clutch released, Bit 3 = 1 = engine running
-  CAN_msg_CLT_TPS.buf[6]= 0x00;  //TPS_VIRT_CRU_CAN (Not used)
-  CAN_msg_CLT_TPS.buf[7]= 0x00;  //not used, but set to zero just in case.
+  CAN_msg_CLT_Baro.buf[0]= 0x11;  //Multiplexed Information
+  CAN_msg_CLT_Baro.buf[2]= 0xB2;  //CLT temp
+  CAN_msg_CLT_Baro.buf[2]= 0xB2;  //CLT temp
+  CAN_msg_CLT_Baro.buf[3]= 0x00;  //IAT
 
-  CAN_msg_BatteryV.buf[0]= 0x11;  //Multiplexed Information
-  CAN_msg_BatteryV.buf[2]= 0xB2;  //CLT temp
-  CAN_msg_BatteryV.buf[3]= 0x00;  //Baro
-  CAN_msg_BatteryV.buf[4]= 0x08;  //bitfield, Bit0 = 0 = Clutch released, Bit 3 = 1 = engine running
-  CAN_msg_BatteryV.buf[6]= 0x00;  //TPS_VIRT_CRU_CAN (Not used)
-  CAN_msg_BatteryV.buf[7]= 0x00;  //not used, but set to zero just in case.
 
   CAN_msg_Pressures.buf[0]= 0x11;  //Multiplexed Information
   CAN_msg_Pressures.buf[2]= 0xB2;  //CLT temp
   CAN_msg_Pressures.buf[3]= 0x00;  //Baro
   CAN_msg_Pressures.buf[4]= 0x08;  //bitfield, Bit0 = 0 = Clutch released, Bit 3 = 1 = engine running
-  CAN_msg_Pressures.buf[6]= 0x00;  //TPS_VIRT_CRU_CAN (Not used)
-  CAN_msg_Pressures.buf[7]= 0x00;  //not used, but set to zero just in case.
 
   CAN_msg_Statuses.buf[0]= 0x11;  //Multiplexed Information
+  CAN_msg_Statuses.buf[1]= 0xB2;  //CLT temp
   CAN_msg_Statuses.buf[2]= 0xB2;  //CLT temp
   CAN_msg_Statuses.buf[3]= 0x00;  //Baro
-  CAN_msg_Statuses.buf[4]= 0x08;  //bitfield, Bit0 = 0 = Clutch released, Bit 3 = 1 = engine running
-  CAN_msg_Statuses.buf[6]= 0x00;  //TPS_VIRT_CRU_CAN (Not used)
-  CAN_msg_Statuses.buf[7]= 0x00;  //not used, but set to zero just in case.
 
   // Start with sensible values for some of these variables.
-  CLT = 60;
+  CLT = 0;
   IAT = 20;
   oilPressure = 0;
   fuelPressure = 0;
@@ -266,8 +249,8 @@ void setup(){
   ascMSG = false;
   radOutletTemp = 0;
   oilTemp = 0;
-  O2=147;
-  egoCorrection=0;
+  O2=0;
+  egoCorrection=100;
   gammaEnrichment=100;
 
 
@@ -279,7 +262,6 @@ void setup(){
 
   Serial.println ("Version date: 3.4.2023"); // To see from debug serial when is used code created.
   doRequest = true; // all set. Start requesting data from speeduino
-  //rRequestCounter = SerialUpdateRate;
 }
 
 
@@ -290,7 +272,7 @@ void displayData(){
   Serial.print ("TPS-"); Serial.print (TPS); Serial.println("\t");
   Serial.print ("OilPressure-"); Serial.print (oilPressure); Serial.println("\t");
   Serial.print ("FuelPressure-"); Serial.print (fuelPressure); Serial.println("\t");
-    Serial.print ("O2-"); Serial.print (O2); Serial.println("\t");
+  Serial.print ("O2-"); Serial.print (O2); Serial.println("\t");
   Serial.print ("EcoCrrection-"); Serial.print (egoCorrection); Serial.println("\t");
 
 }
@@ -356,7 +338,7 @@ void processData(){   // necessary conversion for the data before sending to CAN
   currentStatus.oilPressure = SpeedyResponse[104];
 
   // check if received values makes sense and convert those if all is ok.
-  if (currentStatus.RPM < 8000 && data_error == false)  // the engine will not probaply rev over 8000 RPM
+  if (currentStatus.RPM < 8000 && data_error == false)  // the engine will probably not rev over 8000 RPM
   {
     tempRPM = currentStatus.RPM; // RPM conversion factor for e46/e39 cluster
     rpmMSB = tempRPM >> 8;  // split to high and low byte
@@ -396,11 +378,14 @@ void processData(){   // necessary conversion for the data before sending to CAN
   O2 = currentStatus.O2;
   egoCorrection = currentStatus.egoCorrection;
   gammaEnrichment = currentStatus.corrections;
+  batteryV = currentStatus.battery10;
+  baro = currentStatus.baro;
+  engineStatus = currentStatus.engine;
  }
 
 void HandleN()
 {
-  Serial.print ("n ");
+  //Serial.print ("n ");
   data_error = false;
 
   Serial3.read(); // 0x32
