@@ -1,6 +1,9 @@
 {
     "files.associations": {
         "*.tcc": "cpp",
-        "string": "cpp"
+        "string": "cpp",
+        "system_error": "cpp",
+        "random": "cpp",
+        "sstream": "cpp"
     }
 }

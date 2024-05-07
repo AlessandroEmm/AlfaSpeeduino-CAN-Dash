@@ -22,7 +22,7 @@
 #define ClusterUpdateRate 50  // 50 Hz Frequency for the cars instrument cluster
 
 
-
+ uint16_t RPMS;
 
 static CAN_message_t CAN_msg_RPM;
 static CAN_message_t CAN_msg_CLT_Baro;
@@ -148,45 +148,45 @@ void requestData() {
 }}
 
 void SendData()   // Send can messages in 50Hz phase from timer interrupt. This is important to be high enough Hz rate to make cluster work smoothly.
-{
-  CAN_msg_RPM.buf[2]= rpmLSB; // RPM LSB
-  CAN_msg_RPM.buf[3]= rpmMSB; // RPM MSB
-  CAN_msg_RPM.buf[1]= TPS; // TPS value.
-  CAN_msg_RPM.buf[0]= batteryV; // Battery value.
+{Serial.println(RPMS);
+  CAN_msg_RPM.buf[1]=  RPMS;// RPM LSB
+  CAN_msg_RPM.buf[2]= RPMS >> 8; // RPM MSB
+  CAN_msg_RPM.buf[3]= TPS; // TPS value.
+  CAN_msg_RPM.buf[4]= batteryV; // Battery value.
   CAN_msg_RPM.buf[4]=  O2;
-   CAN_msg_O2.buf[5]= egoCorrection; // ego correction value.
-  CAN_msg_O2.buf[6]= gammaEnrichment; // gamma enrichment value.
+  // CAN_msg_O2.buf[5]= egoCorrection; // ego correction value.
+  //CAN_msg_O2.buf[6]= gammaEnrichment; // gamma enrichment value.
 
-  
   if ( Can1.write(CAN_msg_RPM) ){
     digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // Just to see with internal led that CAN messages are being sent
   }
 
-    //Send CLT and TPS
-  CAN_msg_CLT_Baro.buf[0]= CLT; // Coolant temp
-  CAN_msg_CLT_Baro.buf[1]= IAT; // Air temp
-  CAN_msg_CLT_Baro.buf[2]= baro; // Air temp
-  Can1.write(CAN_msg_CLT_Baro);
+  //   //Send CLT and TPS
+  // CAN_msg_CLT_Baro.buf[0]= CLT; // Coolant temp
+  // CAN_msg_CLT_Baro.buf[1]= IAT; // Air temp
+  // CAN_msg_CLT_Baro.buf[2]= baro; // Air temp
+  // Can1.write(CAN_msg_CLT_Baro);
 
-    //Send Fuel and Oil Pressure
-  CAN_msg_Pressures.buf[0]= oilPressure; // Coolant temp
-  CAN_msg_Pressures.buf[1]= fuelPressure; // TPS value.
-  CAN_msg_Pressures.buf[2]= engineStatus; // EngineStatus
-  Can1.write(CAN_msg_Pressures);
+  //   //Send Fuel and Oil Pressure
+  // CAN_msg_Pressures.buf[0]= oilPressure; // Coolant temp
+  // CAN_msg_Pressures.buf[1]= fuelPressure; // TPS value.
+  // CAN_msg_Pressures.buf[2]= engineStatus; // EngineStatus
+  // Can1.write(CAN_msg_Pressures);
 
   
-  MSGcounter++;
-  if (MSGcounter >= 3)
-  {
-    MSGcounter = 0;
-  }
+  // MSGcounter++;
+  // if (MSGcounter >= 3)
+  // {
+  //   MSGcounter = 0;
+  // }
 }
 
 void setup(){
-  Serial3.begin(115200);  // baudrate for Speeduino is 115200
+ // Serial3.begin(115200);  // baudrate for Speeduino is 115200
   Serial.begin(115200); // for debugging
   
   pinMode(LED_BUILTIN, OUTPUT);
+    pinMode(PA5, INPUT);
 
   doRequest = false;
 
@@ -197,14 +197,14 @@ void setup(){
   Can1.setMBFilterProcessing( MB2, 0x615, 0x1FFFFFFF );
   Can1.setMBFilterProcessing( MB3, 0x1F0, 0x1FFFFFFF );
 
-  CAN_msg_RPM.len = 7; // 8 bytes in can message
+  CAN_msg_RPM.len = 8; // 8 bytes in can message
   CAN_msg_CLT_Baro.len = 3;
   CAN_msg_Pressures.len = 3;
 
-  CAN_msg_RPM.id = 0x316; // CAN ID for RPM message is 0x316
+  CAN_msg_RPM.id = 0x520; // CAN ID for RPM message is 0x316
   CAN_msg_CLT_Baro.id = 0x329; // CAN ID for CLT and TSP message is 0x329
   CAN_msg_Pressures.id = 0x324; // CAN ID for CLT and TSP message is 0x329
-  CAN_msg_O2.id = 0x339; // CAN ID for CLT and TSP message is 0x329
+  //CAN_msg_O2.id = 0x339; // CAN ID for CLT and TSP message is 0x329
 
   // set the static values for the other two messages
   CAN_msg_RPM.buf[0]= 0x01;  //bitfield, Bit0 = 1 = terminal 15 on detected, Bit2 = 1 = 1 = the ASC message ASC1 was received within the last 500 ms and contains no plausibility errors
@@ -237,8 +237,8 @@ void setup(){
   fuelPressure = 0;
   currentStatus.PW1 = 0;
   updatePW = 0;
-  rpmLSB = 0;
-  rpmMSB = 0;
+  rpmLSB = 2;
+  rpmMSB = 4;
   pwLSB = 0;
   pwMSB = 0;
   SerialState = NOTHING_RECEIVED;
@@ -255,12 +255,12 @@ void setup(){
 
 
   SendTimer->setOverflow(ClusterUpdateRate, HERTZ_FORMAT);
-  requestTimer->attachInterrupt(requestData);
+  //requestTimer->attachInterrupt(requestData);
   SendTimer->attachInterrupt(SendData); 
   requestTimer->resume();
   SendTimer->resume();
 
-  Serial.println ("Version date: 3.4.2023"); // To see from debug serial when is used code created.
+ // Serial.println ("Version date: 3.4.2023"); // To see from debug serial when is used code created.
   doRequest = true; // all set. Start requesting data from speeduino
 }
 
@@ -417,20 +417,25 @@ void ReadSerial()
 
 // main loop
 void loop() {
-  switch(SerialState) {
-    case NOTHING_RECEIVED:
-      if (Serial3.available() > 0) { ReadSerial(); }  // read bytes from serial3 to define what message speeduino is sending.
-      break;
-    case N_MESSAGE:
-      if (Serial3.available() >= 118) { HandleN(); }  // read and process the A-message from serial3, when it's fully received.
-      break;
-    default:
-      break;
-  }
+  // switch(SerialState) {
+  //   case NOTHING_RECEIVED:
+  //     if (Serial3.available() > 0) { ReadSerial(); }  // read bytes from serial3 to define what message speeduino is sending.
+  //     break;
+  //   case N_MESSAGE:
+  //     if (Serial3.available() >= 118) { HandleN(); }  // read and process the A-message from serial3, when it's fully received.
+  //     break;
+  //   default:
+  //     break;
+  // }
+  int reading = analogRead(PA5);
+  RPMS = map(reading, 0, 1023, 0, 8000);
 
-  if ( (millis()-oldtime) > 500) { // timeout if for some reason reading serial3 fails
-    oldtime = millis();
-    Serial.println ("Timeout from speeduino!");
-    doRequest = true;                // restart data reading
-  }
+  
+  //SendData();
+
+  // if ( (millis()-oldtime) > 500) { // timeout if for some reason reading serial3 fails
+  //   oldtime = millis(); 
+  //   Serial.println ("Timeout from speeduino!");
+  //   doRequest = true;                // restart data reading
+  // }
 }
