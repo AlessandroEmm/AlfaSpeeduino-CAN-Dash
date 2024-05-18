@@ -50,7 +50,6 @@ SwitecX12::SwitecX12(unsigned int steps, unsigned char pinStep, unsigned char pi
   digitalWrite(pinStep, LOW);
   if (invert) { digitalWrite(pinDir, HIGH); }
   else { digitalWrite(pinDir, LOW); }
-  pinMode(13, OUTPUT);
 
   dir = 0;
   vel = 0;

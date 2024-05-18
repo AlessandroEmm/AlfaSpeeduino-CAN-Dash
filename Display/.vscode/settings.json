@@ -4,6 +4,7 @@
         "string": "cpp",
         "system_error": "cpp",
         "random": "cpp",
-        "sstream": "cpp"
+        "sstream": "cpp",
+        "functional": "cpp"
     }
 }

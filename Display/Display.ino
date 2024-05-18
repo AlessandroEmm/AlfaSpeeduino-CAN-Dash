@@ -63,8 +63,8 @@ SPIClass mySpi = SPIClass(VSPI);
 /* Serial debugging */
 void my_print(const char * buf)
 {
-    Serial.printf(buf);
-    Serial.flush();
+    //Serial.printf(buf);
+    //Serial.flush();
 }
 #endif
 
@@ -272,7 +272,7 @@ void my_touchpad_read( lv_indev_drv_t * indev_driver, lv_indev_data_t * data )
 
 void setup()
 {
-    Serial.begin( 115200 ); /* prepare for possible serial debug */
+  //Serial.begin( 115200 ); /* prepare for possible serial debug */
 
   ESP32Can.CANInit(GPIO_NUM_27, GPIO_NUM_22, ESP32CAN_SPEED_500KBPS);
 
@@ -293,7 +293,7 @@ void setup()
     lv_log_register_print_cb( my_print ); /* register print function for debugging */
 
     tft.begin();          /* TFT init */
-    tft.setRotation(1);//( 3 ); /* Landscape orientation, flipped */
+    tft.setRotation(3);//( 3 ); /* Landscape orientation, flipped */
     mySpi.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
 
     ts.begin(mySpi);
@@ -359,12 +359,6 @@ void setup()
   lv_obj_set_style_text_align(bar_caption, LV_TEXT_ALIGN_RIGHT, 0);
    lv_obj_align_to(bar_caption, bar, LV_ALIGN_OUT_BOTTOM_LEFT, 4, 3);
   lv_obj_add_style(bar_caption,&miniCaptionStyle,0);
-
-
-  //lv_obj_add_event_cb(bar, my_event_cb, LV_EVENT_CLICKED, NULL);   /*Assign an event callback*/
-
-
-
 
 
   static lv_style_t rpmlabel;
@@ -584,8 +578,6 @@ lv_obj_clear_flag( lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE );
                            NULL,
                            1);
 
-    Serial.println( "Setup done" );
-
     
 }
 
@@ -619,7 +611,13 @@ String formatDecimals(int number, int decimals){
      formattedNumber = dnumber.substring(0,1) + "." + dnumber.substring(1);
 
    }
-   if (dnumber.length() == 4 && decimals == 2)
+       else  if (dnumber.length() == 5 && decimals == 3)
+   {
+   
+     formattedNumber = dnumber.substring(0,2) + "." + dnumber.substring(2);
+ 
+   }
+  else if (dnumber.length() == 4 && decimals == 2)
    {
     formattedNumber = dnumber.substring(0,2) + "." + dnumber.substring(2);
    }
@@ -703,7 +701,10 @@ void update_pw(int pw) {
 }
 
 void update_target(int target) {
-   String target_text = formatDecimals(target, 3);
+  String strTarget = String(target);
+  String target_text;
+  if (strTarget.length() == 3)  target_text = "0." + strTarget;
+  else   target_text = formatDecimals(target, 3);
   lv_label_set_text(lambdaTarget_label, target_text.c_str());
 }
 
@@ -717,7 +718,10 @@ void update_pressures(int fp, int oilp, int oilt) {
 }
 
 void update_lambda(int lambda, int correction, int fuelTrim) {
-  String lambda_text = formatDecimals(lambda,3);
+  String strLambda = String(lambda);
+  String lambda_text;
+  if (strLambda.length() == 3)  lambda_text = "0." + strLambda;
+  else   lambda_text = formatDecimals(lambda,3);
   lv_label_set_text(lambda_label, lambda_text.c_str());
   String gamma_text = formatDecimals(fuelTrim, 1);
   lv_label_set_text(gammaCorr_label, gamma_text.c_str());
